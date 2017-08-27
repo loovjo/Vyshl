@@ -3,34 +3,34 @@ module Parser where
 import Data.Char
 import Control.Applicative
 
-data Parser a = Parser { parse :: String -> Maybe (a, String)}
+data Parser a = Parser { parse :: String -> Either (String, Int) (a, String)}
 
 instance Functor Parser where
     fmap f parser =
         Parser $ \x ->
             case parse parser x of
-                Just (a, rest) -> Just (f a, rest)
-                Nothing -> Nothing
+                Right (a, rest) -> Right (f a, rest)
+                Left err -> Left err
 
 bind :: Parser a -> (a -> Parser b) -> Parser b
 bind p f =
     Parser $ \x ->
         case parse p x of
-            Just (a, rest) -> parse (f a) rest
-            Nothing -> Nothing
+            Right (a, rest) -> parse (f a) rest
+            Left err -> Left err
 
 instance Applicative Parser where
-    pure a = 
+    pure a =
         Parser $ \x -> 
-            Just (a, x)
+            Right (a, x)
     p1 <*> p2 = 
         Parser $ \x ->
             case parse p2 x of
-                Just (a, rest) ->
+                Right (a, rest) ->
                     case parse p1 rest of
-                        Just (f, rest') -> Just (f a, rest') 
-                        Nothing -> Nothing
-                Nothing -> Nothing
+                        Right (f, rest') -> Right (f a, rest') 
+                        Left err -> Left err
+                Left err -> Left err
 
 instance Monad Parser where
     return = pure
@@ -40,28 +40,32 @@ instance Alternative Parser where
     p1 <|> p2 = 
         Parser $ \x ->
             case parse p1 x of
-                Just (a, rst) -> Just (a, rst)
-                Nothing -> parse p2 x
+                Right res -> Right res
+                Left err -> parse p2 x
     empty =
-        Parser $ const Nothing
+        Parser $ \x -> Left $ ("Empty!", length x)
 
     many p =
         Parser $ \x ->
             case parse p x of
-                Just (a, rest) ->
+                Right (a, rest) ->
                     case parse (many p) rest of
-                        Just (as, rest') -> Just (a : as, rest')
-                        Nothing -> Just ([a], rest)
-                Nothing -> Just ([], x)
+                        Right (as, rest') -> Right (a : as, rest')
+                        Left _ -> Right ([a], rest)
+                Left _ -> Right ([], x)
 
     some p =
         Parser $ \x ->
             case parse p x of
-                Just (a, rest) ->
+                Right (a, rest) ->
                     case parse (many p) rest of
-                        Just (as, rest') -> Just (a : as, rest')
-                        Nothing -> Just ([a], rest)
-                Nothing -> Nothing
+                        Right (as, rest') -> Right (a : as, rest')
+                        Left _ -> Right ([a], rest)
+                Left err -> Left err
+
+pFail :: (String -> String) -> Parser x
+pFail x =
+    Parser $ \s -> Left (x s, length s)
 
 satisfy :: (Char -> Bool) -> Parser Char
 satisfy f = 
@@ -69,13 +73,28 @@ satisfy f =
         case x of
             a:xs ->
                 if f a
-                    then Just (a, xs)
-                    else Nothing
-            [] -> Nothing
+                    then Right (a, xs)
+                    else Left $ ("Couldn't satisfy function on char " ++ show a, length x)
+            [] -> Left ("Empty stream!", length x)
 
 anyOf :: [Parser a] -> Parser a
-anyOf [] = empty
-anyOf (p:ps) = p <|> anyOf ps
+anyOf = pReduce (<|>)
+
+pReduce :: (Parser a -> Parser a -> Parser a) -> [Parser a] -> Parser a
+pReduce f (p:ps) = p `f` pReduce f ps
+pReduce _ [] = empty
+
+longest :: Parser a -> Parser a -> Parser a
+longest p1 p2 = Parser $ \x ->
+    case parse p1 x of
+        Left _ -> parse p2 x
+        Right (res1, left1) ->
+            case parse p2 x of
+                Left _ -> Right (res1, left1)
+                Right (res2, left2) ->
+                    if length left1 > length left2
+                        then Right (res2, left2)
+                        else Right (res1, left1)
 
 char :: Char -> Parser Char
 char c =
@@ -83,17 +102,20 @@ char c =
         case x of
             a:xs -> 
                 if a == c 
-                    then Just (a, xs)
-                    else Nothing
-            [] -> Nothing
+                    then Right (a, xs)
+                    else Left ("Couldn't find char " ++ show c, length x)
+            [] -> Left ("End of stream!", length x)
 
 -- Only parse this very string, fail if it's not present
 string :: String -> Parser String
 string [] = return []
-string s@(c:cs) = do
-    char c
-    string cs
-    return s
+string s@(c:cs) = 
+    (do
+        char c
+        string cs
+        return s
+    ) <|>
+        ( pFail (\x -> "Looking for " ++ show s ++ " but found " ++ show x) )
 
 token :: Parser x -> Parser x
 token p = do

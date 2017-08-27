@@ -6,16 +6,26 @@ import Data.Char
 import Base
 import Parser
 
-binOps = ["+", "-", "*", "/", "**", "=="]
+binOps = ["+", "-", "*", "/", "**", "==", "!="]
+keywords = ["if", "then", "else"]
 
 langParse :: String -> Either String Ast
 langParse code =
-    case parse term code of
-        Just (a, []) -> Right a
-        Just (a, b) -> Left $ "Chars didn't get parsed: '" ++ b ++ "'"
-        Nothing -> Left "Coundn't parse!"
+    case parse mainParser code of
+        Right (a, []) -> Right a
+        Left (err, left) -> Left $
+            code ++ "\n" ++
+            replicate left ' ' ++
+            "^ " ++ err
 
-term :: Parser Ast
+mainParser :: Parser Ast
+mainParser =
+    Parser $ \x ->
+        case parse term x of
+            Right (a, []) -> Right (a, [])
+            Right (a, b) -> Left ("Chars left that didn't get parsed!", length x - length b)
+            Left x -> Left x
+
 term =
     binOp <|>
     ifOp <|>
@@ -25,30 +35,37 @@ term =
 
 smallTerm =
     atom <|>
-    parens term
+    parens term <|>
+    (pFail (const "Need a token!"))
 
-atom :: Parser Ast
 atom =
-    fmap A_Num (token float) <|> var
+    num <|> bool <|> var
 
-var :: Parser Ast
+num = fmap A_Num (token float)
+
 var = (do
         first <- satisfy isAlpha
         rest <- token $ many $ satisfy isAlphaNum
-        return $ A_Variable $ first : rest
+        let var = first : rest
+
+        if var `elem` keywords
+            then pFail ("Is a keyword: " ++)
+            else return $ A_Variable $ first : rest
     ) <|> parens binOpSmall
 
-binOp :: Parser Ast
+bool = 
+    (reserved "True" >> (return $ A_Bool True))
+    <|>
+    (reserved "False" >> (return $ A_Bool False))
+
 binOp = do
     a <- smallTerm
     op <- binOpSmall
     b <- term
-    return $ A_BinOp op a b
+    return $ A_App (A_App op a) b
 
-binOpSmall :: Parser Ast
-binOpSmall = fmap A_Variable $ anyOf $ map reserved binOps
+binOpSmall = fmap A_Variable $ pReduce longest $ map reserved binOps
 
-ifOp :: Parser Ast
 ifOp = do
     reserved "if"
     cond <- term
@@ -58,16 +75,32 @@ ifOp = do
     false <- term
     return $ A_If cond true false
 
-lambda :: Parser Ast
 lambda = alterparens $ do
-    reserved "\\"
+    char '\\' <|> char 'λ'
     var <- smallTerm
     reserved "->"
     app <- term
     return $ A_Lambda var app
 
-func :: Parser Ast
 func = do
     f <- smallTerm
-    x <- term
-    return $ A_App f x
+    case f of
+        A_Num _ -> pFail ("Not a function"++)
+        A_Bool _ -> pFail ("Not a function"++)
+        _ -> do
+            x <- term
+            return $ 
+                insert x f
+
+{- 
+ - f, a b -> (f a) b
+ - f, (a b) c -> ((f a) b) c
+ - f, ((a b) c) d -> (((f a) b) c) d
+ -}
+
+insert :: Ast -> Ast -> Ast -- Insert takes a function, `f` and an applicaion such as `(a b) c` and returns `((f a) b) c`
+insert app f =
+    case app of
+        A_App a b ->
+            A_App (insert a f) b
+        _ -> A_App f app
