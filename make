@@ -6,5 +6,5 @@ if [[ $? != 0 ]] ; then
 fi
 
 STACK_PATH=$(stack path --local-install-root)
-cp "$STACK_PATH/bin/Lang-exe" "Execs/Lang-$(uname)"
-./Execs/Lang-$(uname)
+cp "$STACK_PATH/bin/Vyshl-exe" "Execs/Vyshl-$(uname)"
+./Execs/Vyshl-$(uname)

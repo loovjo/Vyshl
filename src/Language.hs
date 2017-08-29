@@ -7,7 +7,7 @@ import Base
 import Parser
 
 binOps = ["+", "-", "*", "/", "**", "==", "!="]
-keywords = ["if", "then", "else"]
+keywords = ["if", "then", "else", "let", "in"]
 
 langParse :: String -> Either String Ast
 langParse code =
@@ -31,6 +31,7 @@ term =
     ifOp <|>
     func <|>
     lambda <|>
+    letStmt <|>
     smallTerm
 
 smallTerm =
@@ -44,8 +45,8 @@ atom =
 num = fmap A_Num (token float)
 
 var = (do
-        first <- satisfy isAlpha
-        rest <- token $ many $ satisfy isAlphaNum
+        first <- satisfy (\x -> isAlpha x || x == '_' || ord x > 0xFFFF && generalCategory x /= PrivateUse)
+        rest <- token $ many $ satisfy (\x -> isAlphaNum x || x == '_' || ord x > 0xFFFF && generalCategory x /= PrivateUse)
         let var = first : rest
 
         if var `elem` keywords
@@ -64,7 +65,15 @@ binOp = do
     b <- term
     return $ A_App (A_App op a) b
 
-binOpSmall = fmap A_Variable $ pReduce longest $ map reserved binOps
+binOpSmall :: Parser Ast
+binOpSmall = 
+    fmap A_Variable (pReduce longest $ map reserved binOps)
+    <|> (do
+        reserved "`"
+        func <- smallTerm
+        reserved "`"
+        return $ func
+    )
 
 ifOp = do
     reserved "if"
@@ -75,12 +84,50 @@ ifOp = do
     false <- term
     return $ A_If cond true false
 
-lambda = alterparens $ do
-    char '\\' <|> char 'λ'
-    var <- smallTerm
-    reserved "->"
-    app <- term
-    return $ A_Lambda var app
+lambda = alterparens $ 
+    (do
+        char '\\'
+        var <- smallTerm
+        reserved "->"
+        app <- term
+        return $ A_Lambda var app
+    ) <|>
+    (do
+        char 'λ'
+        var <- smallTerm
+        reserved "."
+        app <- term
+        return $ A_Lambda var app
+    )
+
+letStmt = do
+    reserved "let"
+
+    vars <- letVars
+
+    reserved "in"
+
+    exp <- term
+
+    return $ A_Let vars exp
+
+letVars :: Parser [(Ast, Ast)]
+letVars = 
+    (do
+        var <- letVar
+        reserved ";"
+        rest <- letVars
+        return $ var : rest
+    ) <|> (do
+        var <- letVar
+        return $ [var]
+    )
+
+letVar = do
+    var <- term
+    reserved "="
+    exp <- term
+    return (var, exp)
 
 func = do
     f <- smallTerm

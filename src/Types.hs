@@ -1,6 +1,7 @@
 {-# LANGUAGE ViewPatterns, TupleSections #-}
 module Types where
 
+
 import Data.Maybe
 import Base
 import Builtins
@@ -59,6 +60,13 @@ putToContext ctx@((v, vType) : rest) var@(name, newType) =
                 Right combined -> (v, combined) : rest
                 _ -> var : rest
 
+cAdd :: TypeContext -> TypeContext -> TypeContext
+cAdd ctx [] = ctx
+cAdd ctx (a:rst) = cAdd (putToContext ctx a) rst
+
+ctxSum :: [TypeContext] -> TypeContext
+ctxSum = foldr1 cAdd
+
 defaultTypeContext =
     mapMaybe (\x ->
         case x of
@@ -66,67 +74,41 @@ defaultTypeContext =
             _ -> Nothing
     ) defaultContext
 
-typeCheck :: Ast -> Type -> TypeContext -> Either TypeError (Type, TypeContext)
+typeCheck :: Ast -> Type -> TypeContext -> Either TypeError (Type, TypeContext) -- Takes AST, expected type and context and returns type of expression and new values to the context
 
-typeCheck (A_Num _) t ctx = (, ctx) <$> t `higher` T_Num
+typeCheck (A_Num _) t ctx = (, []) <$> t `higher` T_Num
+typeCheck (A_Bool _) t ctx = (, []) <$> t `higher` T_Bool
 
-typeCheck (A_Bool _) t ctx = (, ctx) <$> t `higher` T_Bool
 
 typeCheck (A_If cond true false) t ctx = do
     (tCond, ctx1) <- typeCheck cond T_Bool ctx
-    (tTrue, ctx2) <- typeCheck true t ctx1
-    (tFalse, ctx3) <- typeCheck false tTrue ctx2
-    (tTrue', ctx4) <- typeCheck true tFalse ctx3 -- Needed for things like `if x then y else 0`, without, y would be :: *
+    (tTrue, ctx2) <- typeCheck true t (ctx `cAdd` ctx1)
+    (tFalse, ctx3) <- typeCheck false tTrue (ctx `cAdd` ctx1 `cAdd` ctx2)
+    (tTrue', ctx4) <- typeCheck true tFalse (ctx `cAdd` ctx1 `cAdd` ctx2 `cAdd` ctx3) -- Needed for things like `if x then y else 0`, without, y would be :: *
 
-    (, ctx4) <$> tTrue' `higher` tFalse
+    (, ctxSum [ctx1, ctx2, ctx3, ctx4]) <$> tTrue' `higher` tFalse
 
 
-typeCheck (A_Variable v) t1 ctx@(flip getFromContext v -> t2) =
-    (\res -> (res, putToContext ctx (v, res))) <$> t1 `higher` t2
+typeCheck (A_Variable v) t1 ctx@(flip getFromContext v -> t2) = do
+    res <- t1 `higher` t2
+    return (res, [(v, res)])
 
-typeCheck (A_Builtin label t f) t' ctx = (, ctx) <$> t `higher` t'
+typeCheck (A_Builtin label t f) t' ctx = (, []) <$> t `higher` t'
 
 typeCheck (A_App f a) t ctx = do
     (tF, ctx1) <- typeCheck f (T_Func T_Any T_Any) ctx
     case tF of
         T_Func arg res -> do
-            (tA, ctx2) <- typeCheck a arg ctx1
+            (tA, ctx2) <- typeCheck a arg (ctx `cAdd` ctx1)
 
-            return (res, ctx2)
+            return (res, ctx1 `cAdd` ctx2)
         _ ->
             Left $ TypeMismatch tF (T_Func T_Any T_Any)
 
-typeCheck (A_Lambda var body) t ctx = do
+typeCheck (A_Lambda var@(A_Variable name) body) t ctx = do
     (T_Func arg res) <- t `higher` T_Func T_Any T_Any
-    (tBody, ctx1) <- typeCheck body res ctx
-    (tVar, ctx2)  <- typeCheck var arg ctx1
+    (tBody, ctx1') <- typeCheck body res ctx
+    let ctx1 = filter (\(v,t) -> v /= name) ctx1' -- Remove var from the resulting context
+    (tVar, ctx2) <- typeCheck var arg (ctx `cAdd` ctx1)
 
-    return $ (T_Func tVar tBody, ctx)
-
-{-
-getType :: Ast -> TypeContext -> Either TypeError Type
-
-getType (A_Num _) _ = Right T_Num
-
-getType (A_Bool _) _ = Right T_Bool
-
-getType (A_Variable v) ctx = getFromContext ctx v
-
-getType x@(A_BinOp _ _ _) ctx =
-    getType (reduce x defaultContext) ctx
-
-getType (A_If cond true false) ctx = do
-    tCond  <- getType cond ctx
-    case tCond of
-        T_Bool -> do
-            tTrue  <- getType true ctx
-            tFalse <- getType false ctx
-
-            if tTrue == tFalse
-                then return tTrue
-                else Left $ TypeMismatch tTrue tFalse
-        _ ->
-            Left $ TypeMismatch tCond T_Bool
-
-
--}
+    return $ (T_Func tVar tBody, ctx1)

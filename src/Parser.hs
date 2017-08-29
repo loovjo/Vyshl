@@ -126,7 +126,7 @@ token p = do
 reserved = token . string
 
 spaces :: Parser String
-spaces = many $ satisfy $ flip elem $ " \n\r"
+spaces = many $ satisfy isSpace
 
 parens :: Parser x -> Parser x
 parens p = do

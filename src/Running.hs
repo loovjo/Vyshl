@@ -8,9 +8,9 @@ type Context = [(String, Ast)]
 
 getFromContext :: String -> Context -> Maybe Ast
 getFromContext _ [] = Nothing
-getFromContext x ((x', y):ctx)
+getFromContext x ((x', y):rest)
     | x == x' = Just y
-    | otherwise = getFromContext x ctx
+    | otherwise = getFromContext x rest
 
 
 reduce :: Ast -> Context -> Ast
