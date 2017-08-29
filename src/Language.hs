@@ -109,7 +109,7 @@ letStmt = do
 
     exp <- term
 
-    return $ A_Let vars exp
+    return $ foldr A_Let exp vars
 
 letVars :: Parser [(Ast, Ast)]
 letVars = 

@@ -36,4 +36,10 @@ reduce (A_If (A_Bool b) x y) ctx =
 
 reduce (A_App f x) ctx = A_App (reduce f ctx) (reduce x ctx)
 
+reduce (A_Let (A_Variable x, val) body) ctx =
+    reduce body ((x, val) : ctx)
+
+reduce (A_Let (A_App x (A_Variable y), val) body) ctx =
+    reduce (A_Let (x, A_Lambda (A_Variable y) val) body) ctx
+
 reduce x _ = x

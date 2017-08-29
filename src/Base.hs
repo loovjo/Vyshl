@@ -27,7 +27,7 @@ data Ast
     | A_Num Float
     | A_Bool Bool
 --    | A_BinOp Ast Ast Ast
-    | A_Let [(Ast, Ast)] Ast
+    | A_Let (Ast, Ast) Ast
     | A_If Ast Ast Ast -- If x then a else b
     | A_App Ast Ast
     | A_Lambda Ast Ast
@@ -37,7 +37,7 @@ data Ast
 prettyShow (A_Num x) = show x
 prettyShow (A_Bool x) = show x
 prettyShow (A_Variable x) = x
-prettyShow (A_Let assigns exp) = "let " ++ intercalate "; " (map (\ (var, exp) -> show var ++ " = " ++ show exp) assigns) ++ " in " ++ show exp
+prettyShow (A_Let (var, val) exp) = "let " ++ show var ++ " = " ++ show val ++ " in " ++ show exp
 prettyShow (A_If cond x y) = "if " ++ prettyShow cond ++ " then " ++ prettyShow x ++ " else " ++ prettyShow y
 prettyShow (A_App f x) = "(" ++ prettyShow f ++ ") (" ++ prettyShow x ++ ")"
 -- prettyShow (A_BinOp op a b) = "(" ++ prettyShow a ++ " " ++ prettyShow op ++ " " ++ prettyShow b ++ ")"
@@ -56,15 +56,12 @@ diagram :: Ast -> [String]
 diagram (A_Num x) = [show x]
 diagram (A_Bool x) = [show x]
 diagram (A_Variable x) = [x]
-diagram (A_Let assigns exp) =
+diagram (A_Let (var, val) exp) =
     dindent
         ["let"]
-        [ dindent ["\\"] $
-            map (\ (var, exp) ->
-                dindent
-                    (diagram var)
-                    [ diagram exp]
-            ) assigns
+        [ dindent
+            (diagram var)
+            [ diagram val ]
         , diagram exp
         ]
 diagram (A_If cond x y) =

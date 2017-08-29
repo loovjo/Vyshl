@@ -112,3 +112,12 @@ typeCheck (A_Lambda var@(A_Variable name) body) t ctx = do
     (tVar, ctx2) <- typeCheck var arg (ctx `cAdd` ctx1)
 
     return $ (T_Func tVar tBody, ctx1)
+
+typeCheck (A_Let (A_Variable x, val) body) t ctx = do -- Put x::val into context for body
+    (xType, ctx') <- typeCheck val T_Any ctx
+    let ctxWithX = ctx' `cAdd` [(x, xType)]
+    (tBody, ctx'') <- typeCheck body t (ctx `cAdd` ctxWithX)
+    return $ (tBody, ctxWithX `cAdd` ctx'')
+
+typeCheck (A_Let (A_App x (A_Variable y), val) body) t ctx =
+    typeCheck (A_Let (x, A_Lambda (A_Variable y) val) body) t ctx
